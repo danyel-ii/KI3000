@@ -33,8 +33,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -108,7 +110,10 @@ fun ThreeStripConsole(
                 StripSpec(width = 62.dp, height = 274.dp, segments = 11),
             ).forEachIndexed { index, spec ->
                 ConsoleStrip(
-                    modifier = Modifier.width(spec.width).height(spec.height),
+                    modifier = Modifier
+                        .width(spec.width)
+                        .height(spec.height)
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
                     segments = spec.segments,
                     intensity = when (mode) {
                         ConsoleMode.BOOT -> 0.2f + index * 0.1f
@@ -137,6 +142,14 @@ private fun ConsoleStrip(
     Canvas(modifier = modifier) {
         val gap = size.height * 0.03f
         val segHeight = (size.height - gap * (segments - 1)) / segments
+        val travel = when (mode) {
+            ConsoleMode.IDLE -> ((sweep * 0.42f) + 0.18f) % 1f
+            ConsoleMode.LISTENING -> (sweep * 1.4f) % 1f
+            ConsoleMode.THINKING -> sweep
+            ConsoleMode.SPEAKING -> (sweep * 1.8f) % 1f
+            ConsoleMode.ERROR -> 0.5f
+            ConsoleMode.BOOT -> 0.1f + (sweep * 0.25f)
+        }
         repeat(segments) { idx ->
             val top = idx * (segHeight + gap)
             val segCenter = idx.toFloat() / (segments - 1).coerceAtLeast(1)
@@ -150,6 +163,15 @@ private fun ConsoleStrip(
                 top = top,
                 height = segHeight,
                 alpha = alpha,
+                lightBand = travel,
+                bandStrength = when (mode) {
+                    ConsoleMode.IDLE -> 0.22f
+                    ConsoleMode.LISTENING -> 0.34f
+                    ConsoleMode.THINKING -> 0.48f
+                    ConsoleMode.SPEAKING -> 0.58f
+                    ConsoleMode.ERROR -> 0.18f
+                    ConsoleMode.BOOT -> 0.28f
+                },
             )
         }
     }
@@ -159,16 +181,55 @@ private fun DrawScope.drawReferenceSegment(
     top: Float,
     height: Float,
     alpha: Float,
+    lightBand: Float,
+    bandStrength: Float,
 ) {
+    val left = size.width * 0.04f
+    val width = size.width * 0.92f
+    val segmentCenter = (top + (height * 0.5f)) / size.height
+    val distance = kotlin.math.abs(segmentCenter - lightBand)
+    val glowBoost = (1f - (distance / 0.22f)).coerceIn(0f, 1f) * bandStrength
+    val baseAlpha = alpha * (0.7f + glowBoost * 0.45f)
     drawRect(
         brush = Brush.verticalGradient(
             listOf(
-                ConsoleRed.copy(alpha = alpha),
-                ConsoleRed.copy(alpha = alpha * 0.92f),
+                ConsoleRed.copy(alpha = baseAlpha),
+                ConsoleRed.copy(alpha = baseAlpha * 0.9f),
             )
         ),
-        topLeft = Offset(size.width * 0.04f, top),
-        size = Size(size.width * 0.92f, height),
+        topLeft = Offset(left, top),
+        size = Size(width, height),
+    )
+    if (glowBoost > 0.02f) {
+        val highlightTop = top + (height * 0.16f)
+        val highlightHeight = height * 0.68f
+        drawRect(
+            brush = Brush.verticalGradient(
+                listOf(
+                    Color.Transparent,
+                    Color(0xFFFFD6D6).copy(alpha = glowBoost * 0.35f),
+                    Color(0xFFFF7777).copy(alpha = glowBoost * 0.55f),
+                    Color.Transparent,
+                )
+            ),
+            topLeft = Offset(left + width * 0.18f, highlightTop),
+            size = Size(width * 0.64f, highlightHeight),
+        )
+        drawRect(
+            color = Color(0xFFFFB7B7).copy(alpha = glowBoost * 0.18f),
+            topLeft = Offset(left + width * 0.06f, top + height * 0.06f),
+            size = Size(width * 0.88f, height * 0.08f),
+        )
+        drawRect(
+            color = Color(0xFFFF5A5A).copy(alpha = glowBoost * 0.1f),
+            topLeft = Offset(left + width * 0.08f, top + height * 0.82f),
+            size = Size(width * 0.84f, height * 0.06f),
+        )
+    }
+    drawRect(
+        color = Color.Black.copy(alpha = 0.1f),
+        topLeft = Offset(left + width * 0.02f, top + height * 0.9f),
+        size = Size(width * 0.96f, height * 0.06f),
     )
 }
 
