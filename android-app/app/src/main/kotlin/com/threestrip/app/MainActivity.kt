@@ -43,7 +43,14 @@ class MainActivity : ComponentActivity() {
                 var lastHandledTtsCompletion by remember { mutableStateOf(0L) }
                 var resolvedStartupModelPath by remember { mutableStateOf<String?>(null) }
                 var startupModelLoadAttempted by remember { mutableStateOf(false) }
-                val voiceOptions = remember(ttsAvailability.ready, settings?.ttsVoiceName) {
+                val engineOptions = remember(ttsAvailability.ready, settings?.ttsEnginePackage) {
+                    container.ttsController.listEngines()
+                }
+                val currentEngineLabel = remember(ttsAvailability.ready, settings?.ttsEnginePackage, engineOptions) {
+                    val selected = settings?.ttsEnginePackage ?: container.ttsController.currentEnginePackage()
+                    engineOptions.firstOrNull { it.packageName == selected }?.label ?: "system"
+                }
+                val voiceOptions = remember(ttsAvailability.ready, settings?.ttsEnginePackage, settings?.ttsVoiceName) {
                     container.ttsController.listVoices()
                 }
                 val currentVoiceLabel = remember(ttsAvailability.ready, settings?.ttsVoiceName, voiceOptions) {
@@ -232,8 +239,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                LaunchedEffect(settings?.ttsVoiceName, ttsAvailability.ready) {
-                    if (ttsAvailability.ready) {
+                LaunchedEffect(settings?.ttsEnginePackage) {
+                    container.ttsController.setEngine(settings?.ttsEnginePackage)
+                }
+
+                LaunchedEffect(settings?.ttsEnginePackage, settings?.ttsVoiceName, ttsAvailability.ready) {
+                    if (ttsAvailability.ready && container.ttsController.currentEnginePackage() == settings?.ttsEnginePackage) {
                         container.ttsController.setVoice(settings?.ttsVoiceName)
                     }
                 }
@@ -250,6 +261,7 @@ class MainActivity : ComponentActivity() {
                         messages = messages,
                         settings = settings!!,
                         modelState = effectiveModelState,
+                        engineLabel = currentEngineLabel,
                         voiceLabel = currentVoiceLabel,
                         onToggleVoiceInput = {
                             if (conversationLoopEnabled) {
@@ -286,6 +298,19 @@ class MainActivity : ComponentActivity() {
                         onToggleTts = { value -> scope.launch { container.settingsStore.updateTtsEnabled(value) } },
                         onToggleAutoSpeak = { value -> scope.launch { container.settingsStore.updateAutoSpeak(value) } },
                         onToggleDebug = { value -> scope.launch { container.settingsStore.updateDebugOverlay(value) } },
+                        onCycleEngine = {
+                            scope.launch {
+                                val engines = container.ttsController.listEngines()
+                                if (engines.isNotEmpty()) {
+                                    val currentPackage = settings?.ttsEnginePackage ?: container.ttsController.currentEnginePackage()
+                                    val currentIndex = engines.indexOfFirst { it.packageName == currentPackage }
+                                    val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % engines.size
+                                    val next = engines[nextIndex]
+                                    container.settingsStore.updateTtsEnginePackage(next.packageName)
+                                    container.settingsStore.updateTtsVoiceName(null)
+                                }
+                            }
+                        },
                         onCycleVoice = {
                             scope.launch {
                                 val voices = container.ttsController.listVoices()

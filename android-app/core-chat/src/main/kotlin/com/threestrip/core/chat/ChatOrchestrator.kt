@@ -5,6 +5,7 @@ import com.threestrip.core.llm.GenerationEvent
 import com.threestrip.core.llm.LocalLlmEngine
 import com.threestrip.core.storage.ChatMessage
 import com.threestrip.core.storage.ConsoleMode
+import com.threestrip.core.storage.KITT_RUNTIME_PROMPT
 import com.threestrip.core.storage.KITT_SYSTEM_PROMPT
 import com.threestrip.core.storage.ModelLoadState
 import com.threestrip.core.storage.TranscriptStore
@@ -48,14 +49,20 @@ class PromptAssembler(
         corpusText: String = "",
     ): String {
         return buildString {
-            val cleanSystemPrompt = systemPrompt.ifBlank { KITT_SYSTEM_PROMPT }
+            val cleanSystemPrompt = when {
+                systemPrompt.isBlank() -> KITT_RUNTIME_PROMPT
+                systemPrompt == KITT_SYSTEM_PROMPT -> KITT_RUNTIME_PROMPT
+                else -> systemPrompt.trim().take(1_600)
+            }
             val cleanCorpus = corpusText.trim().take(maxCorpusChars)
             append("system: ")
             append(cleanSystemPrompt)
             append("\n")
-            append("facts: ")
-            append(APP_FACTS)
-            append("\n")
+            if (cleanSystemPrompt.length < 1_200) {
+                append("facts: ")
+                append(APP_FACTS)
+                append("\n")
+            }
             if (cleanCorpus.isNotEmpty()) {
                 append("reference: ")
                 append(cleanCorpus)

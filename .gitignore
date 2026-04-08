@@ -12,3 +12,4 @@ android-app/local.properties
 
 *.log
 models/
+downloads/

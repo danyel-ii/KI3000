@@ -48,6 +48,7 @@ class SettingsStore(private val context: Context) {
     private val corpusPathKey = stringPreferencesKey("corpus_path")
     private val ttsEnabledKey = booleanPreferencesKey("tts_enabled")
     private val autoSpeakKey = booleanPreferencesKey("auto_speak")
+    private val ttsEnginePackageKey = stringPreferencesKey("tts_engine_package")
     private val ttsVoiceNameKey = stringPreferencesKey("tts_voice_name")
     private val debugOverlayKey = booleanPreferencesKey("debug_overlay")
 
@@ -60,6 +61,7 @@ class SettingsStore(private val context: Context) {
                 corpusPath = prefs[corpusPathKey],
                 ttsEnabled = prefs[ttsEnabledKey] ?: true,
                 autoSpeak = prefs[autoSpeakKey] ?: true,
+                ttsEnginePackage = prefs[ttsEnginePackageKey],
                 ttsVoiceName = prefs[ttsVoiceNameKey],
                 debugOverlay = prefs[debugOverlayKey] ?: false,
             )
@@ -89,6 +91,12 @@ class SettingsStore(private val context: Context) {
 
     suspend fun updateAutoSpeak(value: Boolean) {
         context.settingsDataStore.edit { it[autoSpeakKey] = value }
+    }
+
+    suspend fun updateTtsEnginePackage(value: String?) {
+        context.settingsDataStore.edit { prefs ->
+            if (value.isNullOrBlank()) prefs.remove(ttsEnginePackageKey) else prefs[ttsEnginePackageKey] = value
+        }
     }
 
     suspend fun updateTtsVoiceName(value: String?) {

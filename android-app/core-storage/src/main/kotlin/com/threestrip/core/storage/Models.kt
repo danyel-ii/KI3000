@@ -33,6 +33,7 @@ data class AppSettings(
     val corpusPath: String? = null,
     val ttsEnabled: Boolean = true,
     val autoSpeak: Boolean = true,
+    val ttsEnginePackage: String? = null,
     val ttsVoiceName: String? = null,
     val debugOverlay: Boolean = false,
 )

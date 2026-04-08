@@ -42,10 +42,12 @@ import java.io.File
 fun SettingsSheet(
     settings: AppSettings,
     modelState: ModelLoadState,
+    engineLabel: String,
     voiceLabel: String,
     onToggleTts: (Boolean) -> Unit,
     onToggleAutoSpeak: (Boolean) -> Unit,
     onToggleDebug: (Boolean) -> Unit,
+    onCycleEngine: () -> Unit,
     onCycleVoice: () -> Unit,
     onOpenSpeechSettings: () -> Unit,
     onImportModel: () -> Unit,
@@ -135,6 +137,13 @@ fun SettingsSheet(
                 modifier = Modifier.weight(1f)
             )
         }
+        ActionRow(
+            label = "ENGINE",
+            value = engineLabel,
+            glyph = "[]",
+            onClick = onCycleEngine,
+            modifier = Modifier.padding(top = 12.dp)
+        )
         ActionRow(
             label = "VOICE",
             value = voiceLabel,
@@ -242,6 +251,7 @@ private fun AboutPage(modelStatus: String, modelLabel: String) {
         AboutLine("##", "DOC", "imports a local reference corpus for prompt grounding")
         AboutLine("X", "CLR", "clears saved transcript history")
         AboutLine("LLM", "status", "shows whether the local model is empty, imported, loading, ready, or error")
+        AboutLine("ENG", "engine", "cycles through installed local text-to-speech engines such as RHVoice")
         AboutLine("VOX", "voice", "cycles through available local text-to-speech voices")
         AboutLine("FILE", "model", "shows the active model filename from app-private storage")
         AboutLine("SYS", "status", "shows whether the saved preprompt is empty or set")
