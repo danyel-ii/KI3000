@@ -42,11 +42,13 @@ import java.io.File
 fun SettingsSheet(
     settings: AppSettings,
     modelState: ModelLoadState,
+    languageLabel: String,
     engineLabel: String,
     voiceLabel: String,
     onToggleTts: (Boolean) -> Unit,
     onToggleAutoSpeak: (Boolean) -> Unit,
     onToggleDebug: (Boolean) -> Unit,
+    onCycleLanguage: () -> Unit,
     onCycleEngine: () -> Unit,
     onCycleVoice: () -> Unit,
     onOpenSpeechSettings: () -> Unit,
@@ -127,16 +129,30 @@ fun SettingsSheet(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             StatusTile(
+                label = "LANG",
+                value = languageLabel,
+                modifier = Modifier.weight(1f)
+            )
+            StatusTile(
                 label = "VOX",
                 value = voiceLabel.take(18),
                 modifier = Modifier.weight(1f)
             )
-            StatusTile(
-                label = "FILE",
-                value = modelLabel.take(18),
-                modifier = Modifier.weight(1f)
-            )
         }
+        StatusTile(
+            label = "FILE",
+            value = modelLabel.take(18),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp)
+        )
+        ActionRow(
+            label = "LANGUAGE",
+            value = languageLabel,
+            glyph = "DE",
+            onClick = onCycleLanguage,
+            modifier = Modifier.padding(top = 12.dp)
+        )
         ActionRow(
             label = "ENGINE",
             value = engineLabel,
@@ -250,6 +266,7 @@ private fun AboutPage(modelStatus: String, modelLabel: String) {
         AboutLine("[]", "LLM", "imports a local model file into app-private storage")
         AboutLine("##", "DOC", "imports a local reference corpus for prompt grounding")
         AboutLine("X", "CLR", "clears saved transcript history")
+        AboutLine("DE", "language", "switches app speech input and speech output between English and German")
         AboutLine("LLM", "status", "shows whether the local model is empty, imported, loading, ready, or error")
         AboutLine("ENG", "engine", "cycles through installed local text-to-speech engines such as RHVoice")
         AboutLine("VOX", "voice", "cycles through available local text-to-speech voices")

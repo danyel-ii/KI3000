@@ -1,7 +1,6 @@
 package com.threestrip.core.audio
 
 import android.content.Context
-import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.TextToSpeech.EngineInfo
 import android.speech.tts.UtteranceProgressListener
@@ -45,6 +44,7 @@ class ConsoleTtsController(private val context: Context) : TextToSpeech.OnInitLi
     private val _completedUtterances = MutableStateFlow(0L)
     val completedUtterances: StateFlow<Long> = _completedUtterances
     private var ready = false
+    private var preferredLocale: Locale = Locale.forLanguageTag("en-US")
 
     init {
         attachUtteranceListener(tts)
@@ -106,6 +106,7 @@ class ConsoleTtsController(private val context: Context) : TextToSpeech.OnInitLi
     fun speak(text: String): Boolean {
         Log.d(TAG, "speak: ready=$ready length=${text.length}")
         if (!ready || text.isBlank()) return false
+        ensureVoiceMatchesLocale()
         val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
         return if (result == TextToSpeech.SUCCESS) {
             true
@@ -131,6 +132,8 @@ class ConsoleTtsController(private val context: Context) : TextToSpeech.OnInitLi
 
     fun currentVoiceName(): String? = tts.voice?.name
 
+    fun currentLocaleTag(): String = preferredLocale.toLanguageTag()
+
     fun setEngine(packageName: String?): Boolean {
         ready = false
         _availability.value = TtsAvailability(
@@ -149,10 +152,28 @@ class ConsoleTtsController(private val context: Context) : TextToSpeech.OnInitLi
         return true
     }
 
+    fun setPreferredLocale(locale: Locale): Boolean {
+        preferredLocale = locale
+        if (!ready) return false
+        val languageResult = tts.setLanguage(preferredLocale)
+        ready = languageResult != TextToSpeech.LANG_MISSING_DATA && languageResult != TextToSpeech.LANG_NOT_SUPPORTED
+        ensureVoiceMatchesLocale()
+        _voiceOptions.value = listVoicesInternal()
+        _availability.value = if (ready) {
+            TtsAvailability(ready = true)
+        } else {
+            TtsAvailability(
+                ready = false,
+                message = "Speech output language is unavailable. Install a TTS voice."
+            )
+        }
+        return ready
+    }
+
     fun setVoice(name: String?): Boolean {
         if (!ready) return false
         val targetVoice = if (name.isNullOrBlank()) {
-            tts.defaultVoice
+            defaultVoiceForLocale()
         } else {
             tts.voices.orEmpty().firstOrNull { it.name == name }
         } ?: return false
@@ -174,7 +195,9 @@ class ConsoleTtsController(private val context: Context) : TextToSpeech.OnInitLi
 
     private fun listVoicesInternal(): List<TtsVoiceOption> {
         val preferredLocale = resolvePreferredLocale()
-        return tts.voices.orEmpty()
+        val allVoices = tts.voices.orEmpty()
+        val matchingVoices = allVoices.filter { voiceMatchesLanguage(it = it, target = preferredLocale) }
+        return (matchingVoices.ifEmpty { allVoices })
             .sortedWith(
                 compareByDescending<Voice> { voiceMatchesLocale(it = it, target = preferredLocale) }
                     .thenByDescending { voiceMatchesLanguage(it = it, target = preferredLocale) }
@@ -192,21 +215,21 @@ class ConsoleTtsController(private val context: Context) : TextToSpeech.OnInitLi
     }
 
     private fun resolvePreferredLocale(): Locale {
-        val configured = runCatching {
-            Settings.Secure.getString(context.contentResolver, "tts_default_locale")
-        }.getOrNull().orEmpty()
-        val currentEngine = currentEnginePackage()
-        val engineLocale = configured
-            .split(',')
-            .map { it.trim() }
-            .firstOrNull { entry ->
-                currentEngine != null && entry.startsWith("$currentEngine:")
-            }
-            ?.substringAfter(':')
-            ?.takeIf { it.isNotBlank() }
-            ?.replace('_', '-')
-            ?.let(Locale::forLanguageTag)
-        return engineLocale ?: Locale.getDefault()
+        return preferredLocale
+    }
+
+    private fun ensureVoiceMatchesLocale() {
+        val current = tts.voice
+        if (current != null && voiceMatchesLanguage(current, preferredLocale)) return
+        val fallback = defaultVoiceForLocale() ?: return
+        runCatching { tts.voice = fallback }
+            .onFailure { Log.w(TAG, "ensureVoiceMatchesLocale: failed to switch voice", it) }
+    }
+
+    private fun defaultVoiceForLocale(): Voice? {
+        return tts.voices.orEmpty().firstOrNull { voiceMatchesLocale(it, preferredLocale) }
+            ?: tts.voices.orEmpty().firstOrNull { voiceMatchesLanguage(it, preferredLocale) }
+            ?: tts.defaultVoice
     }
 
     private fun voiceMatchesLocale(it: Voice, target: Locale): Boolean {

@@ -88,15 +88,22 @@ class LiteRtLocalLlmEngine(private val context: Context) : LocalLlmEngine {
         }
         try {
             Log.d(TAG, "generate: starting prompt length=${prompt.length}")
-            val response = withContext(Dispatchers.IO) {
-                withTimeout(GENERATION_TIMEOUT_MS) {
-                    engine.generateResponseAsync(prompt).await()
-                }
-            }
+            val response = generateResponse(engine, prompt)
             Log.d(TAG, "generate: completed response length=${response.length}")
             if (response.isBlank()) {
-                Log.e(TAG, "generate: blank response")
-                send(GenerationEvent.Error("Local model returned an empty reply. Try again or clear history."))
+                val fallbackPrompt = buildFallbackPrompt(prompt)
+                Log.w(TAG, "generate: blank response, retrying fallback prompt length=${fallbackPrompt.length}")
+                val fallbackResponse = generateResponse(engine, fallbackPrompt)
+                Log.d(TAG, "generate: fallback completed response length=${fallbackResponse.length}")
+                if (fallbackResponse.isBlank()) {
+                    Log.e(TAG, "generate: blank response after fallback")
+                    send(GenerationEvent.Error("Local model returned an empty reply. Try again or clear history."))
+                    return@channelFlow
+                }
+                fallbackResponse.chunked(24).forEach { chunk ->
+                    send(GenerationEvent.Token(chunk))
+                }
+                send(GenerationEvent.Completed(fallbackResponse))
                 return@channelFlow
             }
             response.chunked(24).forEach { chunk ->
@@ -125,6 +132,42 @@ class LiteRtLocalLlmEngine(private val context: Context) : LocalLlmEngine {
                     else -> current
                 }
             }
+        }
+    }
+
+    private suspend fun generateResponse(engine: LlmInference, prompt: String): String {
+        return withContext(Dispatchers.IO) {
+            withTimeout(GENERATION_TIMEOUT_MS) {
+                engine.generateResponseAsync(prompt).await().trim()
+            }
+        }
+    }
+
+    private fun buildFallbackPrompt(prompt: String): String {
+        val responseLanguageLine = prompt
+            .lineSequence()
+            .lastOrNull { it.startsWith("response_language:") }
+            ?.substringAfter(':')
+            ?.trim()
+            .orEmpty()
+        val latestUserLine = prompt
+            .lineSequence()
+            .lastOrNull { it.startsWith("user:") }
+            ?.removePrefix("user:")
+            ?.trim()
+            .orEmpty()
+        val question = latestUserLine.ifBlank { prompt.takeLast(400) }
+        return buildString {
+            appendLine("system: You are KITT, a local offline assistant inside the ThreeStrip Android voice app.")
+            appendLine("system_rules: Answer the user's latest request directly in 1 to 3 short sentences. Be accurate and concrete. Do not invent facts, app capabilities, product identity, or history.")
+            if (responseLanguageLine.isNotBlank()) {
+                append("response_language: ")
+                appendLine(responseLanguageLine)
+            }
+            appendLine("facts: ThreeStrip is a local voice-first Android chat app that runs a local model and speaks replies with Android text to speech.")
+            append("user: ")
+            appendLine(question)
+            append("assistant:")
         }
     }
 }

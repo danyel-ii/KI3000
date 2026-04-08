@@ -46,6 +46,7 @@ class SettingsStore(private val context: Context) {
     private val modelPathKey = stringPreferencesKey("model_path")
     private val systemPromptKey = stringPreferencesKey("system_prompt")
     private val corpusPathKey = stringPreferencesKey("corpus_path")
+    private val speechLanguageTagKey = stringPreferencesKey("speech_language_tag")
     private val ttsEnabledKey = booleanPreferencesKey("tts_enabled")
     private val autoSpeakKey = booleanPreferencesKey("auto_speak")
     private val ttsEnginePackageKey = stringPreferencesKey("tts_engine_package")
@@ -59,6 +60,7 @@ class SettingsStore(private val context: Context) {
                 modelPath = prefs[modelPathKey],
                 systemPrompt = prefs[systemPromptKey] ?: KITT_SYSTEM_PROMPT,
                 corpusPath = prefs[corpusPathKey],
+                speechLanguageTag = prefs[speechLanguageTagKey] ?: "en-US",
                 ttsEnabled = prefs[ttsEnabledKey] ?: true,
                 autoSpeak = prefs[autoSpeakKey] ?: true,
                 ttsEnginePackage = prefs[ttsEnginePackageKey],
@@ -82,6 +84,12 @@ class SettingsStore(private val context: Context) {
     suspend fun updateCorpusPath(path: String?) {
         context.settingsDataStore.edit { prefs ->
             if (path == null) prefs.remove(corpusPathKey) else prefs[corpusPathKey] = path
+        }
+    }
+
+    suspend fun updateSpeechLanguageTag(value: String) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[speechLanguageTagKey] = value
         }
     }
 

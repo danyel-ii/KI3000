@@ -31,6 +31,7 @@ data class AppSettings(
     val modelPath: String? = null,
     val systemPrompt: String = "",
     val corpusPath: String? = null,
+    val speechLanguageTag: String = "en-US",
     val ttsEnabled: Boolean = true,
     val autoSpeak: Boolean = true,
     val ttsEnginePackage: String? = null,

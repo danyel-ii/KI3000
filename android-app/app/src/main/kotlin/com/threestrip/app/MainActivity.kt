@@ -17,11 +17,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.threestrip.core.storage.ConsoleMode
-import com.threestrip.core.storage.KITT_SYSTEM_PROMPT
+import com.threestrip.core.storage.AppSettings
 import com.threestrip.core.storage.ModelLoadState
 import com.threestrip.core.ui.ThreeStripTheme
 import com.threestrip.feature.console.ConsoleRoute
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,7 +30,9 @@ class MainActivity : ComponentActivity() {
         val container = (application as ThreeStripApp).container
         setContent {
             ThreeStripTheme {
-                val settings by container.settingsStore.settings.collectAsState(initial = null)
+                val settings by container.settingsStore.settings.collectAsState(
+                    initial = AppSettings(systemPrompt = "")
+                )
                 val messages by container.transcriptRepository.observeMessages().collectAsState(initial = emptyList())
                 val ui by container.chatOrchestrator.uiState.collectAsState()
                 val ttsMode by container.ttsController.mode.collectAsState()
@@ -53,6 +56,12 @@ class MainActivity : ComponentActivity() {
                 val voiceOptions = remember(ttsAvailability.ready, settings?.ttsEnginePackage, settings?.ttsVoiceName) {
                     container.ttsController.listVoices()
                 }
+                val languageTag = settings.speechLanguageTag
+                val selectedLocale = remember(languageTag) { Locale.forLanguageTag(languageTag) }
+                val currentLanguageLabel = when (selectedLocale.language) {
+                    Locale.GERMAN.language -> "Deutsch"
+                    else -> "English"
+                }
                 val currentVoiceLabel = remember(ttsAvailability.ready, settings?.ttsVoiceName, voiceOptions) {
                     val selected = settings?.ttsVoiceName ?: container.ttsController.currentVoiceName()
                     voiceOptions.firstOrNull { it.name == selected }?.label ?: "default"
@@ -65,13 +74,13 @@ class MainActivity : ComponentActivity() {
                     ModelLoadState.Empty -> settings?.modelPath?.let { ModelLoadState.Imported(it) } ?: ui.modelState
                 }
                 suspend fun submitVoiceInput(spoken: String) {
-                    val settingsSnapshot = settings ?: return
-                    val corpusText = container.modelFileRepository.readText(settingsSnapshot.corpusPath)
+                    val corpusText = container.modelFileRepository.readText(settings.corpusPath)
                     container.chatOrchestrator.submit(
                         messages = messages,
                         input = spoken,
-                        systemPrompt = settingsSnapshot.systemPrompt,
+                        systemPrompt = settings.systemPrompt,
                         corpusText = corpusText,
+                        responseLanguageTag = settings.speechLanguageTag,
                     )
                 }
                 val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -101,7 +110,7 @@ class MainActivity : ComponentActivity() {
                             is ModelLoadState.Loading -> engineState
                             is ModelLoadState.Imported -> engineState
                             ModelLoadState.Empty -> {
-                                val resolvedPath = settings?.modelPath ?: container.modelFileRepository.firstLocalModelPath()
+                                val resolvedPath = settings.modelPath ?: container.modelFileRepository.firstLocalModelPath()
                                 if (resolvedPath != null) {
                                     container.chatOrchestrator.updateModelState(ModelLoadState.Imported(resolvedPath))
                                     container.llmEngine.loadModel(resolvedPath)
@@ -154,7 +163,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(settings?.modelPath) {
-                    val configuredPath = settings?.modelPath
+                    val configuredPath = settings.modelPath
                     val resolvedPath = configuredPath ?: resolvedStartupModelPath ?: container.modelFileRepository.firstLocalModelPath()
                     if (configuredPath == null && resolvedPath != null) {
                         resolvedStartupModelPath = resolvedPath
@@ -177,12 +186,6 @@ class MainActivity : ComponentActivity() {
                             resolvedStartupModelPath = resolvedPath
                             container.chatOrchestrator.updateModelState(container.llmEngine.loadModel(resolvedPath))
                         }
-                    }
-                }
-
-                LaunchedEffect(settings?.systemPrompt) {
-                    if (settings != null && settings?.systemPrompt != KITT_SYSTEM_PROMPT) {
-                        container.settingsStore.updateSystemPrompt(KITT_SYSTEM_PROMPT)
                     }
                 }
 
@@ -240,101 +243,115 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(settings?.ttsEnginePackage) {
-                    container.ttsController.setEngine(settings?.ttsEnginePackage)
+                    container.ttsController.setEngine(settings.ttsEnginePackage)
                 }
 
-                LaunchedEffect(settings?.ttsEnginePackage, settings?.ttsVoiceName, ttsAvailability.ready) {
-                    if (ttsAvailability.ready && container.ttsController.currentEnginePackage() == settings?.ttsEnginePackage) {
-                        container.ttsController.setVoice(settings?.ttsVoiceName)
+                LaunchedEffect(languageTag) {
+                    if (speechMode != ConsoleMode.LISTENING) {
+                        container.speechInputController.setPreferredLocale(selectedLocale)
+                    }
+                    container.ttsController.setPreferredLocale(selectedLocale)
+                }
+
+                LaunchedEffect(settings.ttsEnginePackage, settings.ttsVoiceName, ttsAvailability.ready) {
+                    val selectedEngine = settings.ttsEnginePackage ?: container.ttsController.currentEnginePackage()
+                    if (ttsAvailability.ready && container.ttsController.currentEnginePackage() == selectedEngine) {
+                        container.ttsController.setVoice(settings.ttsVoiceName)
                     }
                 }
 
-                if (settings != null) {
-                    ConsoleRoute(
-                        orchestrator = container.chatOrchestrator,
-                        displayMode = when {
-                            ttsMode == ConsoleMode.SPEAKING -> ConsoleMode.SPEAKING
-                            speechMode == ConsoleMode.LISTENING -> ConsoleMode.LISTENING
-                            speechMode == ConsoleMode.ERROR -> ConsoleMode.ERROR
-                            else -> ui.mode
-                        },
-                        messages = messages,
-                        settings = settings!!,
-                        modelState = effectiveModelState,
-                        engineLabel = currentEngineLabel,
-                        voiceLabel = currentVoiceLabel,
-                        onToggleVoiceInput = {
-                            if (conversationLoopEnabled) {
-                                conversationLoopEnabled = false
-                                restartAfterSpeech = false
-                                container.speechInputController.cancel()
-                                container.ttsController.stop()
-                                container.chatOrchestrator.stopAll()
-                            } else {
-                                conversationLoopEnabled = true
-                                startVoiceConversation()
-                            }
-                        },
-                        onStopAll = {
+                ConsoleRoute(
+                    orchestrator = container.chatOrchestrator,
+                    displayMode = when {
+                        ttsMode == ConsoleMode.SPEAKING -> ConsoleMode.SPEAKING
+                        speechMode == ConsoleMode.LISTENING -> ConsoleMode.LISTENING
+                        speechMode == ConsoleMode.ERROR -> ConsoleMode.ERROR
+                        else -> ui.mode
+                    },
+                    messages = messages,
+                    settings = settings,
+                    modelState = effectiveModelState,
+                    languageLabel = currentLanguageLabel,
+                    engineLabel = currentEngineLabel,
+                    voiceLabel = currentVoiceLabel,
+                    onToggleVoiceInput = {
+                        if (conversationLoopEnabled) {
                             conversationLoopEnabled = false
                             restartAfterSpeech = false
                             container.speechInputController.cancel()
                             container.ttsController.stop()
                             container.chatOrchestrator.stopAll()
-                        },
-                        onImportModel = { uri ->
-                            scope.launch {
-                                val file = container.modelFileRepository.importModel(uri)
-                                container.settingsStore.updateModelPath(file.absolutePath)
-                                container.chatOrchestrator.updateModelState(container.llmEngine.loadModel(file.absolutePath))
+                        } else {
+                            conversationLoopEnabled = true
+                            startVoiceConversation()
+                        }
+                    },
+                    onStopAll = {
+                        conversationLoopEnabled = false
+                        restartAfterSpeech = false
+                        container.speechInputController.cancel()
+                        container.ttsController.stop()
+                        container.chatOrchestrator.stopAll()
+                    },
+                    onImportModel = { uri ->
+                        scope.launch {
+                            val file = container.modelFileRepository.importModel(uri)
+                            container.settingsStore.updateModelPath(file.absolutePath)
+                            container.chatOrchestrator.updateModelState(container.llmEngine.loadModel(file.absolutePath))
+                        }
+                    },
+                    onImportCorpus = { uri ->
+                        scope.launch {
+                            val file = container.modelFileRepository.importCorpus(uri)
+                            container.settingsStore.updateCorpusPath(file.absolutePath)
+                        }
+                    },
+                    onToggleTts = { value -> scope.launch { container.settingsStore.updateTtsEnabled(value) } },
+                    onToggleAutoSpeak = { value -> scope.launch { container.settingsStore.updateAutoSpeak(value) } },
+                    onToggleDebug = { value -> scope.launch { container.settingsStore.updateDebugOverlay(value) } },
+                    onCycleLanguage = {
+                        scope.launch {
+                            val nextTag = if (languageTag.startsWith("de", ignoreCase = true)) "en-US" else "de-DE"
+                            container.settingsStore.updateSpeechLanguageTag(nextTag)
+                            container.settingsStore.updateTtsVoiceName(null)
+                        }
+                    },
+                    onCycleEngine = {
+                        scope.launch {
+                            val engines = container.ttsController.listEngines()
+                            if (engines.isNotEmpty()) {
+                                val currentPackage = settings.ttsEnginePackage ?: container.ttsController.currentEnginePackage()
+                                val currentIndex = engines.indexOfFirst { it.packageName == currentPackage }
+                                val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % engines.size
+                                val next = engines[nextIndex]
+                                container.settingsStore.updateTtsEnginePackage(next.packageName)
+                                container.settingsStore.updateTtsVoiceName(null)
                             }
-                        },
-                        onImportCorpus = { uri ->
-                            scope.launch {
-                                val file = container.modelFileRepository.importCorpus(uri)
-                                container.settingsStore.updateCorpusPath(file.absolutePath)
+                        }
+                    },
+                    onCycleVoice = {
+                        scope.launch {
+                            val voices = container.ttsController.listVoices()
+                            if (voices.isNotEmpty()) {
+                                val currentName = settings.ttsVoiceName ?: container.ttsController.currentVoiceName()
+                                val currentIndex = voices.indexOfFirst { it.name == currentName }
+                                val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % voices.size
+                                val next = voices[nextIndex]
+                                container.settingsStore.updateTtsVoiceName(next.name)
                             }
-                        },
-                        onToggleTts = { value -> scope.launch { container.settingsStore.updateTtsEnabled(value) } },
-                        onToggleAutoSpeak = { value -> scope.launch { container.settingsStore.updateAutoSpeak(value) } },
-                        onToggleDebug = { value -> scope.launch { container.settingsStore.updateDebugOverlay(value) } },
-                        onCycleEngine = {
-                            scope.launch {
-                                val engines = container.ttsController.listEngines()
-                                if (engines.isNotEmpty()) {
-                                    val currentPackage = settings?.ttsEnginePackage ?: container.ttsController.currentEnginePackage()
-                                    val currentIndex = engines.indexOfFirst { it.packageName == currentPackage }
-                                    val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % engines.size
-                                    val next = engines[nextIndex]
-                                    container.settingsStore.updateTtsEnginePackage(next.packageName)
-                                    container.settingsStore.updateTtsVoiceName(null)
-                                }
-                            }
-                        },
-                        onCycleVoice = {
-                            scope.launch {
-                                val voices = container.ttsController.listVoices()
-                                if (voices.isNotEmpty()) {
-                                    val currentName = settings?.ttsVoiceName ?: container.ttsController.currentVoiceName()
-                                    val currentIndex = voices.indexOfFirst { it.name == currentName }
-                                    val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % voices.size
-                                    val next = voices[nextIndex]
-                                    container.settingsStore.updateTtsVoiceName(next.name)
-                                }
-                            }
-                        },
-                        onOpenSpeechSettings = {
-                            startActivity(Intent("android.settings.VOICE_INPUT_SETTINGS"))
-                        },
-                        onSaveSystemPrompt = { value ->
-                            scope.launch { container.settingsStore.updateSystemPrompt(value) }
-                        },
-                        onClearCorpus = {
-                            scope.launch { container.settingsStore.updateCorpusPath(null) }
-                        },
-                        onClearHistory = { scope.launch { container.transcriptRepository.clear() } },
-                    )
-                }
+                        }
+                    },
+                    onOpenSpeechSettings = {
+                        startActivity(Intent("android.settings.VOICE_INPUT_SETTINGS"))
+                    },
+                    onSaveSystemPrompt = { value ->
+                        scope.launch { container.settingsStore.updateSystemPrompt(value) }
+                    },
+                    onClearCorpus = {
+                        scope.launch { container.settingsStore.updateCorpusPath(null) }
+                    },
+                    onClearHistory = { scope.launch { container.transcriptRepository.clear() } },
+                )
             }
         }
     }

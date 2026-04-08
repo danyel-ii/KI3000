@@ -29,9 +29,25 @@ class PromptAssemblerTest {
             systemPrompt = "Stay terse.",
             corpusText = "ABCDEFGHIJKLMN",
         )
-        assertThat(prompt).contains("system: Stay terse.")
+        assertThat(prompt).contains("system_role: You are KITT")
+        assertThat(prompt).contains("Additional user-configured instruction:")
+        assertThat(prompt).contains("Stay terse.")
+        assertThat(prompt).contains("response_language: Reply entirely in English")
         assertThat(prompt).contains("reference: ABCDEFGHIJ")
         assertThat(prompt).contains("assistant: ready")
         assertThat(prompt).contains("user: question")
+    }
+
+    @Test
+    fun trimLocksGermanResponseLanguage() {
+        val assembler = PromptAssembler(maxMessages = 1)
+        val prompt = assembler.trim(
+            messages = emptyList(),
+            userInput = "Wie funktioniert die App?",
+            systemPrompt = "Be useful.",
+            responseLanguageTag = "de-DE",
+        )
+        assertThat(prompt).contains("Reply entirely in German")
+        assertThat(prompt).contains("Do not invent facts, capabilities, history, or app identity")
     }
 }

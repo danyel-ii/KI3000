@@ -30,6 +30,7 @@ class OfflineSpeechInputController(private val context: Context) {
     private var onRecognized: ((String) -> Unit)? = null
     private var onError: ((String) -> Unit)? = null
     private var listening = false
+    private var preferredLocale: Locale = Locale.forLanguageTag("en-US")
 
     fun startListening(
         onRecognized: (String) -> Unit,
@@ -57,7 +58,7 @@ class OfflineSpeechInputController(private val context: Context) {
         speechRecognizer.startListening(
             Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, preferredLocale.toLanguageTag())
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
@@ -87,6 +88,11 @@ class OfflineSpeechInputController(private val context: Context) {
         recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
+    }
+
+    fun setPreferredLocale(locale: Locale) {
+        preferredLocale = locale
+        Log.d(TAG, "setPreferredLocale: ${locale.toLanguageTag()}")
     }
 
     private val listener = object : RecognitionListener {

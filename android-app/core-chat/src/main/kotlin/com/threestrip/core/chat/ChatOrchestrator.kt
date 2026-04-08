@@ -5,10 +5,9 @@ import com.threestrip.core.llm.GenerationEvent
 import com.threestrip.core.llm.LocalLlmEngine
 import com.threestrip.core.storage.ChatMessage
 import com.threestrip.core.storage.ConsoleMode
-import com.threestrip.core.storage.KITT_RUNTIME_PROMPT
-import com.threestrip.core.storage.KITT_SYSTEM_PROMPT
 import com.threestrip.core.storage.ModelLoadState
 import com.threestrip.core.storage.TranscriptStore
+import com.threestrip.core.storage.systemPromptForInference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,9 +36,16 @@ class PromptAssembler(
 ) {
     private companion object {
         const val APP_FACTS =
-            "App facts: ThreeStrip is a local, voice-first Android chat app with a retro three-bar console UI. " +
-                "It records speech on-device, runs a local language model on-device, speaks replies with Android text to speech, " +
+            "App facts: KITT is the assistant persona running inside ThreeStrip, a local, voice-first Android chat app with a retro three-bar console UI. " +
+                "KITT records speech on-device, runs a local language model on-device, speaks replies with Android text to speech, " +
                 "stores transcript history locally on the phone, supports importing a local model file, and does not use a cloud backend."
+
+        fun responseLanguageInstruction(languageTag: String): String = when {
+            languageTag.startsWith("de", ignoreCase = true) ->
+                "Reply entirely in German. Do not answer in English unless the user explicitly asks for English."
+            else ->
+                "Reply entirely in English unless the user explicitly asks for another language."
+        }
     }
 
     fun trim(
@@ -47,27 +53,29 @@ class PromptAssembler(
         userInput: String,
         systemPrompt: String = "",
         corpusText: String = "",
+        responseLanguageTag: String = "en-US",
     ): String {
         return buildString {
-            val cleanSystemPrompt = when {
-                systemPrompt.isBlank() -> KITT_RUNTIME_PROMPT
-                systemPrompt == KITT_SYSTEM_PROMPT -> KITT_RUNTIME_PROMPT
-                else -> systemPrompt.trim().take(1_600)
-            }
+            val cleanSystemPrompt = systemPromptForInference(systemPrompt)
             val cleanCorpus = corpusText.trim().take(maxCorpusChars)
-            append("system: ")
+            append("system_role: ")
             append(cleanSystemPrompt)
             append("\n")
-            if (cleanSystemPrompt.length < 1_200) {
-                append("facts: ")
-                append(APP_FACTS)
-                append("\n")
-            }
+            append("system_rules: ")
+            append("Answer the user's actual request directly. Refer to yourself as KITT. Do not invent facts, capabilities, history, or app identity. If asked about KITT, describe yourself as the assistant persona inside the ThreeStrip app. If asked about ThreeStrip, describe only its real local voice-chat behavior.")
+            append("\n")
+            append("response_language: ")
+            append(responseLanguageInstruction(responseLanguageTag))
+            append("\n")
+            append("facts: ")
+            append(APP_FACTS)
+            append("\n")
             if (cleanCorpus.isNotEmpty()) {
                 append("reference: ")
                 append(cleanCorpus)
                 append("\n")
             }
+            append("conversation_mode: respond to the latest user turn; do not repeat earlier answers; keep the reply short unless the user asks for depth.\n")
             val history = messages.takeLast(maxMessages).dropLastWhile { it.role == "user" && it.text.trim() == userInput }
             history.forEach { append("${it.role}: ${it.text}\n") }
             append("user: $userInput\nassistant:")
@@ -117,6 +125,7 @@ class ChatOrchestrator(
         input: String,
         systemPrompt: String = "",
         corpusText: String = "",
+        responseLanguageTag: String = "en-US",
     ) {
         val draft = input.trim()
         if (draft.isBlank()) return
@@ -132,6 +141,7 @@ class ChatOrchestrator(
                 userInput = draft,
                 systemPrompt = systemPrompt,
                 corpusText = corpusText,
+                responseLanguageTag = responseLanguageTag,
             )
             Log.d(TAG, "submit: prompt length=${prompt.length}")
             llmEngine.generate(prompt).collect { event ->
