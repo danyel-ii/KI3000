@@ -36,7 +36,7 @@ class PromptAssembler(
 ) {
     private companion object {
         const val APP_FACTS =
-            "App facts: KITT is the assistant persona running inside ThreeStrip, a local, voice-first Android chat app with a retro three-bar console UI. " +
+            "App facts: KITT is a local, voice-first Android chat app and assistant with a retro three-bar console UI. " +
                 "KITT records speech on-device, runs a local language model on-device, speaks replies with Android text to speech, " +
                 "stores transcript history locally on the phone, supports importing a local model file, and does not use a cloud backend."
 
@@ -62,7 +62,7 @@ class PromptAssembler(
             append(cleanSystemPrompt)
             append("\n")
             append("system_rules: ")
-            append("Answer the user's actual request directly. Refer to yourself as KITT. Do not invent facts, capabilities, history, or app identity. If asked about KITT, describe yourself as the assistant persona inside the ThreeStrip app. If asked about ThreeStrip, describe only its real local voice-chat behavior.")
+            append("Answer the user's actual request directly. Refer to yourself as KITT. Do not invent facts, capabilities, history, or app identity. If asked about KITT, describe yourself as a local Android voice assistant and companion. Never call yourself ThreeStrip or any variant of it.")
             append("\n")
             append("response_language: ")
             append(responseLanguageInstruction(responseLanguageTag))

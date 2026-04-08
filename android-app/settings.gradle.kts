@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ThreeStrip"
+rootProject.name = "KITT"
 
 include(
     ":app",

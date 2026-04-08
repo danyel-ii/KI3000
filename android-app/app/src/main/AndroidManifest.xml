@@ -5,7 +5,7 @@
         android:name=".ThreeStripApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="ThreeStrip"
+        android:label="KITT"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.ThreeStrip">

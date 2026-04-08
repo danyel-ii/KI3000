@@ -158,13 +158,13 @@ class LiteRtLocalLlmEngine(private val context: Context) : LocalLlmEngine {
             .orEmpty()
         val question = latestUserLine.ifBlank { prompt.takeLast(400) }
         return buildString {
-            appendLine("system: You are KITT, a local offline assistant inside the ThreeStrip Android voice app.")
+            appendLine("system: You are KITT, a local offline Android voice assistant.")
             appendLine("system_rules: Answer the user's latest request directly in 1 to 3 short sentences. Be accurate and concrete. Do not invent facts, app capabilities, product identity, or history.")
             if (responseLanguageLine.isNotBlank()) {
                 append("response_language: ")
                 appendLine(responseLanguageLine)
             }
-            appendLine("facts: ThreeStrip is a local voice-first Android chat app that runs a local model and speaks replies with Android text to speech.")
+            appendLine("facts: KITT is a local voice-first Android app that runs a local model and speaks replies with Android text to speech.")
             append("user: ")
             appendLine(question)
             append("assistant:")
