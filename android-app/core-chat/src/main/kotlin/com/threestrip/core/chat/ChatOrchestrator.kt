@@ -1,9 +1,11 @@
 package com.threestrip.core.chat
 
+import android.util.Log
 import com.threestrip.core.llm.GenerationEvent
 import com.threestrip.core.llm.LocalLlmEngine
 import com.threestrip.core.storage.ChatMessage
 import com.threestrip.core.storage.ConsoleMode
+import com.threestrip.core.storage.KITT_SYSTEM_PROMPT
 import com.threestrip.core.storage.ModelLoadState
 import com.threestrip.core.storage.TranscriptStore
 import kotlinx.coroutines.CoroutineScope
@@ -29,9 +31,16 @@ data class ConsoleUiState(
 )
 
 class PromptAssembler(
-    private val maxMessages: Int = 12,
-    private val maxCorpusChars: Int = 3_000,
+    private val maxMessages: Int = 4,
+    private val maxCorpusChars: Int = 1_200,
 ) {
+    private companion object {
+        const val APP_FACTS =
+            "App facts: ThreeStrip is a local, voice-first Android chat app with a retro three-bar console UI. " +
+                "It records speech on-device, runs a local language model on-device, speaks replies with Android text to speech, " +
+                "stores transcript history locally on the phone, supports importing a local model file, and does not use a cloud backend."
+    }
+
     fun trim(
         messages: List<ChatMessage>,
         userInput: String,
@@ -39,19 +48,21 @@ class PromptAssembler(
         corpusText: String = "",
     ): String {
         return buildString {
-            val cleanSystemPrompt = systemPrompt.trim()
+            val cleanSystemPrompt = systemPrompt.ifBlank { KITT_SYSTEM_PROMPT }
             val cleanCorpus = corpusText.trim().take(maxCorpusChars)
-            if (cleanSystemPrompt.isNotEmpty()) {
-                append("system: ")
-                append(cleanSystemPrompt)
-                append("\n")
-            }
+            append("system: ")
+            append(cleanSystemPrompt)
+            append("\n")
+            append("facts: ")
+            append(APP_FACTS)
+            append("\n")
             if (cleanCorpus.isNotEmpty()) {
                 append("reference: ")
                 append(cleanCorpus)
                 append("\n")
             }
-            messages.takeLast(maxMessages).forEach { append("${it.role}: ${it.text}\n") }
+            val history = messages.takeLast(maxMessages).dropLastWhile { it.role == "user" && it.text.trim() == userInput }
+            history.forEach { append("${it.role}: ${it.text}\n") }
             append("user: $userInput\nassistant:")
         }
     }
@@ -63,6 +74,10 @@ class ChatOrchestrator(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate),
     private val promptAssembler: PromptAssembler = PromptAssembler(),
 ) {
+    private companion object {
+        const val TAG = "ThreeStripChat"
+    }
+
     private val _uiState = MutableStateFlow(ConsoleUiState())
     val uiState: StateFlow<ConsoleUiState> = _uiState.asStateFlow()
     private var activeJob: Job? = null
@@ -85,8 +100,8 @@ class ChatOrchestrator(
     }
 
     fun stopAll() {
+        Log.d(TAG, "stopAll: cancelling active UI work without unloading model")
         activeJob?.cancel()
-        scope.launch { llmEngine.stop() }
         _uiState.update { it.copy(mode = ConsoleMode.IDLE) }
     }
 
@@ -98,10 +113,12 @@ class ChatOrchestrator(
     ) {
         val draft = input.trim()
         if (draft.isBlank()) return
+        Log.d(TAG, "submit: user input length=${draft.length}")
         activeJob?.cancel()
         activeJob = scope.launch {
             val user = ChatMessage(UUID.randomUUID().toString(), "user", draft, System.currentTimeMillis())
             transcriptRepository.append(user)
+            Log.d(TAG, "submit: user message persisted")
             _uiState.update { it.copy(mode = ConsoleMode.THINKING, transientReply = "", error = null) }
             val prompt = promptAssembler.trim(
                 messages = messages + user,
@@ -109,25 +126,34 @@ class ChatOrchestrator(
                 systemPrompt = systemPrompt,
                 corpusText = corpusText,
             )
+            Log.d(TAG, "submit: prompt length=${prompt.length}")
             llmEngine.generate(prompt).collect { event ->
                 when (event) {
-                    is GenerationEvent.Token -> _uiState.update { state ->
-                        state.copy(mode = ConsoleMode.THINKING, transientReply = state.transientReply + event.text)
+                    is GenerationEvent.Token -> {
+                        Log.d(TAG, "generate: token chunk length=${event.text.length}")
+                        _uiState.update { state ->
+                            state.copy(mode = ConsoleMode.THINKING, transientReply = state.transientReply + event.text)
+                        }
                     }
 
                     is GenerationEvent.Completed -> {
                         val reply = event.text.ifBlank { uiState.value.transientReply }
                         transcriptRepository.append(ChatMessage(UUID.randomUUID().toString(), "assistant", reply, System.currentTimeMillis()))
+                        Log.d(TAG, "generate: completed reply length=${reply.length}")
                         _uiState.update { it.copy(mode = ConsoleMode.IDLE, transientReply = reply) }
                     }
 
-                    is GenerationEvent.Error -> pushError(event.message)
+                    is GenerationEvent.Error -> {
+                        Log.e(TAG, "generate: error=${event.message}")
+                        pushError(event.message)
+                    }
                 }
             }
         }
     }
 
     private fun pushError(message: String) {
+        Log.e(TAG, "pushError: $message")
         _uiState.update { it.copy(mode = ConsoleMode.ERROR, error = message) }
         scope.launch {
             delay(1400)

@@ -1,6 +1,7 @@
 package com.threestrip.core.llm
 
 import android.content.Context
+import android.util.Log
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
 import com.threestrip.core.storage.ModelLoadState
@@ -10,7 +11,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
+import java.io.File
 
 sealed interface GenerationEvent {
     data class Token(val text: String) : GenerationEvent
@@ -26,56 +31,100 @@ interface LocalLlmEngine {
 }
 
 class LiteRtLocalLlmEngine(private val context: Context) : LocalLlmEngine {
+    private companion object {
+        const val TAG = "ThreeStripLlm"
+        const val GENERATION_TIMEOUT_MS = 90_000L
+    }
+
     private var llmInference: LlmInference? = null
+    private val engineMutex = Mutex()
+    private var loadedPath: String? = null
     @Volatile
     override var state: ModelLoadState = ModelLoadState.Empty
         private set
 
     override suspend fun loadModel(path: String): ModelLoadState = withContext(Dispatchers.IO) {
-        state = ModelLoadState.Loading(path)
-        runCatching {
-            llmInference?.close()
-            val options = LlmInferenceOptions.builder()
-                .setModelPath(path)
-                .setMaxTokens(256)
-                .setPreferredBackend(LlmInference.Backend.CPU)
-                .build()
-            llmInference = LlmInference.createFromOptions(context, options)
-            state = ModelLoadState.Ready(path)
-            state
-        }.getOrElse { error ->
-            state = ModelLoadState.Error(error.message ?: "Model load failed")
-            state
+        engineMutex.withLock {
+            val modelFile = File(path)
+            if (!modelFile.exists() || !modelFile.isFile) {
+                Log.e(TAG, "loadModel: missing file at $path")
+                state = ModelLoadState.Error("Model file is unavailable.")
+                return@withLock state
+            }
+            if (loadedPath == path && llmInference != null && state is ModelLoadState.Ready) {
+                Log.d(TAG, "loadModel: already ready for $path")
+                return@withLock state
+            }
+            state = ModelLoadState.Loading(path)
+            runCatching {
+                Log.d(TAG, "loadModel: creating inference for $path")
+                llmInference?.close()
+                llmInference = null
+                val options = LlmInferenceOptions.builder()
+                    .setModelPath(path)
+                    .setMaxTokens(256)
+                    .setPreferredBackend(LlmInference.Backend.CPU)
+                    .build()
+                llmInference = LlmInference.createFromOptions(context, options)
+                loadedPath = path
+                state = ModelLoadState.Ready(path)
+                Log.d(TAG, "loadModel: ready for $path")
+                state
+            }.getOrElse { error ->
+                loadedPath = null
+                Log.e(TAG, "loadModel: failed for $path", error)
+                state = ModelLoadState.Error(error.message ?: "Model load failed")
+                state
+            }
         }
     }
 
     override fun generate(prompt: String): Flow<GenerationEvent> = channelFlow {
         val engine = llmInference
         if (engine == null) {
+            Log.e(TAG, "generate: engine unavailable")
             send(GenerationEvent.Error("Import a local model to begin."))
             return@channelFlow
         }
         try {
+            Log.d(TAG, "generate: starting prompt length=${prompt.length}")
             val response = withContext(Dispatchers.IO) {
-                engine.generateResponseAsync(prompt).await()
+                withTimeout(GENERATION_TIMEOUT_MS) {
+                    engine.generateResponseAsync(prompt).await()
+                }
+            }
+            Log.d(TAG, "generate: completed response length=${response.length}")
+            if (response.isBlank()) {
+                Log.e(TAG, "generate: blank response")
+                send(GenerationEvent.Error("Local model returned an empty reply. Try again or clear history."))
+                return@channelFlow
             }
             response.chunked(24).forEach { chunk ->
                 send(GenerationEvent.Token(chunk))
             }
             send(GenerationEvent.Completed(response))
         } catch (cancelled: CancellationException) {
+            Log.d(TAG, "generate: cancelled")
             throw cancelled
         } catch (error: Throwable) {
+            Log.e(TAG, "generate: failed", error)
             send(GenerationEvent.Error(error.message ?: "Generation failed"))
         }
     }
 
     override suspend fun stop() {
-        withContext(Dispatchers.IO) { llmInference?.close(); llmInference = null }
-        state = when (val current = state) {
-            is ModelLoadState.Ready -> ModelLoadState.Imported(current.path)
-            is ModelLoadState.Loading -> ModelLoadState.Imported(current.path)
-            else -> current
+        withContext(Dispatchers.IO) {
+            engineMutex.withLock {
+                Log.d(TAG, "stop: unloading current model")
+                llmInference?.close()
+                llmInference = null
+                loadedPath = null
+                state = when (val current = state) {
+                    is ModelLoadState.Ready -> ModelLoadState.Imported(current.path)
+                    is ModelLoadState.Loading -> ModelLoadState.Imported(current.path)
+                    else -> current
+                }
+            }
         }
     }
 }

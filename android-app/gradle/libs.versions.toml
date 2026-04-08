@@ -16,7 +16,7 @@ truth = "1.4.4"
 androidxTestExt = "1.2.1"
 espresso = "3.6.1"
 composeUiTest = "1.7.2"
-mediapipeGenai = "0.10.24"
+mediapipeGenai = "0.10.27"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }

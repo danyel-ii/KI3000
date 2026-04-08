@@ -11,3 +11,4 @@ android-app/**/build/
 android-app/local.properties
 
 *.log
+models/

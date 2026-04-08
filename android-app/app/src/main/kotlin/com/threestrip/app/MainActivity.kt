@@ -14,8 +14,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.threestrip.core.storage.ConsoleMode
+import com.threestrip.core.storage.KITT_SYSTEM_PROMPT
 import com.threestrip.core.storage.ModelLoadState
 import com.threestrip.core.ui.ThreeStripTheme
 import com.threestrip.feature.console.ConsoleRoute
@@ -33,8 +35,28 @@ class MainActivity : ComponentActivity() {
                 val ttsMode by container.ttsController.mode.collectAsState()
                 val speechMode by container.speechInputController.mode.collectAsState()
                 val ttsAvailability by container.ttsController.availability.collectAsState()
+                val ttsCompletions by container.ttsController.completedUtterances.collectAsState()
                 val scope = rememberCoroutineScope()
                 val lastSpokenId = remember { mutableStateOf<String?>(null) }
+                var conversationLoopEnabled by remember { mutableStateOf(false) }
+                var restartAfterSpeech by remember { mutableStateOf(false) }
+                var lastHandledTtsCompletion by remember { mutableStateOf(0L) }
+                var resolvedStartupModelPath by remember { mutableStateOf<String?>(null) }
+                var startupModelLoadAttempted by remember { mutableStateOf(false) }
+                val voiceOptions = remember(ttsAvailability.ready, settings?.ttsVoiceName) {
+                    container.ttsController.listVoices()
+                }
+                val currentVoiceLabel = remember(ttsAvailability.ready, settings?.ttsVoiceName, voiceOptions) {
+                    val selected = settings?.ttsVoiceName ?: container.ttsController.currentVoiceName()
+                    voiceOptions.firstOrNull { it.name == selected }?.label ?: "default"
+                }
+                val effectiveModelState = when (val engineState = container.llmEngine.state) {
+                    is ModelLoadState.Ready -> engineState
+                    is ModelLoadState.Error -> engineState
+                    is ModelLoadState.Loading -> engineState
+                    is ModelLoadState.Imported -> engineState
+                    ModelLoadState.Empty -> settings?.modelPath?.let { ModelLoadState.Imported(it) } ?: ui.modelState
+                }
                 suspend fun submitVoiceInput(spoken: String) {
                     val settingsSnapshot = settings ?: return
                     val corpusText = container.modelFileRepository.readText(settingsSnapshot.corpusPath)
@@ -59,14 +81,101 @@ class MainActivity : ComponentActivity() {
                             onError = container.chatOrchestrator::onVoiceInputError,
                         )
                     } else {
+                        conversationLoopEnabled = false
                         container.chatOrchestrator.onVoiceInputError("Microphone permission is required.")
+                    }
+                }
+                fun startVoiceConversation() {
+                    restartAfterSpeech = false
+                    scope.launch {
+                        val modelState = when (val engineState = container.llmEngine.state) {
+                            is ModelLoadState.Ready -> engineState
+                            is ModelLoadState.Error -> engineState
+                            is ModelLoadState.Loading -> engineState
+                            is ModelLoadState.Imported -> engineState
+                            ModelLoadState.Empty -> {
+                                val resolvedPath = settings?.modelPath ?: container.modelFileRepository.firstLocalModelPath()
+                                if (resolvedPath != null) {
+                                    container.chatOrchestrator.updateModelState(ModelLoadState.Imported(resolvedPath))
+                                    container.llmEngine.loadModel(resolvedPath)
+                                } else {
+                                    ModelLoadState.Empty
+                                }
+                            }
+                        }
+                        container.chatOrchestrator.updateModelState(modelState)
+                        when (modelState) {
+                            is ModelLoadState.Ready -> {
+                                val hasMicPermission = ContextCompat.checkSelfPermission(
+                                    this@MainActivity,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasMicPermission) {
+                                    container.ttsController.stop()
+                                    container.chatOrchestrator.stopAll()
+                                    container.chatOrchestrator.onVoiceListening()
+                                    container.speechInputController.startListening(
+                                        onRecognized = { spoken ->
+                                            scope.launch { submitVoiceInput(spoken) }
+                                        },
+                                        onError = {
+                                            restartAfterSpeech = false
+                                            container.chatOrchestrator.onVoiceInputError(it)
+                                        },
+                                    )
+                                } else {
+                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            }
+
+                            is ModelLoadState.Error -> {
+                                conversationLoopEnabled = false
+                                container.chatOrchestrator.onLocalFailure(modelState.message)
+                            }
+
+                            is ModelLoadState.Loading,
+                            is ModelLoadState.Imported -> {
+                                container.chatOrchestrator.onLocalFailure("Model is still loading.")
+                            }
+
+                            ModelLoadState.Empty -> {
+                                conversationLoopEnabled = false
+                                container.chatOrchestrator.onLocalFailure("Import a local model first.")
+                            }
+                        }
                     }
                 }
 
                 LaunchedEffect(settings?.modelPath) {
-                    settings?.modelPath?.let { path ->
-                        container.chatOrchestrator.updateModelState(ModelLoadState.Imported(path))
-                        container.chatOrchestrator.updateModelState(container.llmEngine.loadModel(path))
+                    val configuredPath = settings?.modelPath
+                    val resolvedPath = configuredPath ?: resolvedStartupModelPath ?: container.modelFileRepository.firstLocalModelPath()
+                    if (configuredPath == null && resolvedPath != null) {
+                        resolvedStartupModelPath = resolvedPath
+                        container.settingsStore.updateModelPath(resolvedPath)
+                    }
+                    if (resolvedPath != null) {
+                        val currentModelState = ui.modelState
+                        val alreadyResolved = when (currentModelState) {
+                            is ModelLoadState.Ready -> currentModelState.path == resolvedPath
+                            is ModelLoadState.Loading -> currentModelState.path == resolvedPath
+                            is ModelLoadState.Imported -> currentModelState.path == resolvedPath
+                            is ModelLoadState.Error -> false
+                            ModelLoadState.Empty -> false
+                        }
+                        if (!alreadyResolved) {
+                            container.chatOrchestrator.updateModelState(ModelLoadState.Imported(resolvedPath))
+                        }
+                        if (!startupModelLoadAttempted || resolvedStartupModelPath != resolvedPath) {
+                            startupModelLoadAttempted = true
+                            resolvedStartupModelPath = resolvedPath
+                            container.chatOrchestrator.updateModelState(container.llmEngine.loadModel(resolvedPath))
+                        }
+                    }
+                }
+
+                LaunchedEffect(settings?.systemPrompt) {
+                    if (settings != null && settings?.systemPrompt != KITT_SYSTEM_PROMPT) {
+                        container.settingsStore.updateSystemPrompt(KITT_SYSTEM_PROMPT)
                     }
                 }
 
@@ -81,21 +190,51 @@ class MainActivity : ComponentActivity() {
                     ) {
                         lastSpokenId.value = latest.id
                         if (!ttsAvailability.ready) {
+                            restartAfterSpeech = false
                             container.chatOrchestrator.onLocalFailure(
                                 ttsAvailability.message ?: "Speech output is unavailable."
                             )
                         } else if (!container.ttsController.speak(latest.text)) {
+                            restartAfterSpeech = false
                             container.chatOrchestrator.onLocalFailure(
                                 container.ttsController.availability.value.message
                                     ?: "Speech output failed."
                             )
+                        } else {
+                            restartAfterSpeech = conversationLoopEnabled
                         }
+                    } else if (
+                        latest != null &&
+                        latest.role == "assistant" &&
+                        latest.id != lastSpokenId.value &&
+                        conversationLoopEnabled
+                    ) {
+                        lastSpokenId.value = latest.id
+                        startVoiceConversation()
                     }
                 }
 
                 LaunchedEffect(speechMode) {
                     if (speechMode == ConsoleMode.IDLE) {
                         container.chatOrchestrator.onVoiceInputCleared()
+                    }
+                }
+
+                LaunchedEffect(ttsCompletions, conversationLoopEnabled, restartAfterSpeech) {
+                    if (
+                        conversationLoopEnabled &&
+                        restartAfterSpeech &&
+                        ttsCompletions > lastHandledTtsCompletion
+                    ) {
+                        lastHandledTtsCompletion = ttsCompletions
+                        restartAfterSpeech = false
+                        startVoiceConversation()
+                    }
+                }
+
+                LaunchedEffect(settings?.ttsVoiceName, ttsAvailability.ready) {
+                    if (ttsAvailability.ready) {
+                        container.ttsController.setVoice(settings?.ttsVoiceName)
                     }
                 }
 
@@ -110,48 +249,23 @@ class MainActivity : ComponentActivity() {
                         },
                         messages = messages,
                         settings = settings!!,
-                        onPressVoiceInput = {
-                            val modelReady = when (ui.modelState) {
-                                is ModelLoadState.Ready -> true
-                                is ModelLoadState.Imported,
-                                is ModelLoadState.Loading -> {
-                                    container.chatOrchestrator.onLocalFailure("Model is still loading.")
-                                    false
-                                }
-                                is ModelLoadState.Error -> {
-                                    container.chatOrchestrator.onLocalFailure(
-                                        (ui.modelState as ModelLoadState.Error).message
-                                    )
-                                    false
-                                }
-                                ModelLoadState.Empty -> {
-                                    container.chatOrchestrator.onLocalFailure("Import a local model first.")
-                                    false
-                                }
-                            }
-                            if (!modelReady) return@ConsoleRoute
-                            val hasMicPermission = ContextCompat.checkSelfPermission(
-                                this@MainActivity,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-                            if (hasMicPermission) {
+                        modelState = effectiveModelState,
+                        voiceLabel = currentVoiceLabel,
+                        onToggleVoiceInput = {
+                            if (conversationLoopEnabled) {
+                                conversationLoopEnabled = false
+                                restartAfterSpeech = false
+                                container.speechInputController.cancel()
                                 container.ttsController.stop()
                                 container.chatOrchestrator.stopAll()
-                                container.chatOrchestrator.onVoiceListening()
-                                container.speechInputController.startListening(
-                                    onRecognized = { spoken ->
-                                        scope.launch { submitVoiceInput(spoken) }
-                                    },
-                                    onError = container.chatOrchestrator::onVoiceInputError,
-                                )
                             } else {
-                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                conversationLoopEnabled = true
+                                startVoiceConversation()
                             }
                         },
-                        onReleaseVoiceInput = {
-                            container.speechInputController.stop()
-                        },
                         onStopAll = {
+                            conversationLoopEnabled = false
+                            restartAfterSpeech = false
                             container.speechInputController.cancel()
                             container.ttsController.stop()
                             container.chatOrchestrator.stopAll()
@@ -172,6 +286,18 @@ class MainActivity : ComponentActivity() {
                         onToggleTts = { value -> scope.launch { container.settingsStore.updateTtsEnabled(value) } },
                         onToggleAutoSpeak = { value -> scope.launch { container.settingsStore.updateAutoSpeak(value) } },
                         onToggleDebug = { value -> scope.launch { container.settingsStore.updateDebugOverlay(value) } },
+                        onCycleVoice = {
+                            scope.launch {
+                                val voices = container.ttsController.listVoices()
+                                if (voices.isNotEmpty()) {
+                                    val currentName = settings?.ttsVoiceName ?: container.ttsController.currentVoiceName()
+                                    val currentIndex = voices.indexOfFirst { it.name == currentName }
+                                    val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % voices.size
+                                    val next = voices[nextIndex]
+                                    container.settingsStore.updateTtsVoiceName(next.name)
+                                }
+                            }
+                        },
                         onOpenSpeechSettings = {
                             startActivity(Intent("android.settings.VOICE_INPUT_SETTINGS"))
                         },

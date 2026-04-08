@@ -21,6 +21,7 @@ import com.threestrip.core.chat.ChatOrchestrator
 import com.threestrip.core.storage.AppSettings
 import com.threestrip.core.storage.ChatMessage
 import com.threestrip.core.storage.ConsoleMode
+import com.threestrip.core.storage.ModelLoadState
 import com.threestrip.core.ui.BootOverlay
 import com.threestrip.core.ui.SettingsCogButton
 import com.threestrip.core.ui.ThreeStripConsole
@@ -37,14 +38,16 @@ fun ConsoleRoute(
     displayMode: ConsoleMode,
     messages: List<ChatMessage>,
     settings: AppSettings,
-    onPressVoiceInput: () -> Unit,
-    onReleaseVoiceInput: () -> Unit,
+    modelState: ModelLoadState,
+    voiceLabel: String,
+    onToggleVoiceInput: () -> Unit,
     onStopAll: () -> Unit,
     onImportModel: (Uri) -> Unit,
     onImportCorpus: (Uri) -> Unit,
     onToggleTts: (Boolean) -> Unit,
     onToggleAutoSpeak: (Boolean) -> Unit,
     onToggleDebug: (Boolean) -> Unit,
+    onCycleVoice: () -> Unit,
     onOpenSpeechSettings: () -> Unit,
     onSaveSystemPrompt: (String) -> Unit,
     onClearCorpus: () -> Unit,
@@ -96,14 +99,7 @@ fun ConsoleRoute(
             mode = displayMode,
             modifier = Modifier.pointerInput(Unit) {
                 detectTapGestures(
-                    onPress = {
-                        onPressVoiceInput()
-                        try {
-                            tryAwaitRelease()
-                        } finally {
-                            onReleaseVoiceInput()
-                        }
-                    },
+                    onTap = { onToggleVoiceInput() },
                     onDoubleTap = { onStopAll() },
                 )
             }
@@ -126,9 +122,12 @@ fun ConsoleRoute(
             ModalBottomSheet(onDismissRequest = orchestrator::closeSettings) {
                 SettingsSheet(
                     settings = settings,
+                    modelState = modelState,
+                    voiceLabel = voiceLabel,
                     onToggleTts = onToggleTts,
                     onToggleAutoSpeak = onToggleAutoSpeak,
                     onToggleDebug = onToggleDebug,
+                    onCycleVoice = onCycleVoice,
                     onOpenSpeechSettings = onOpenSpeechSettings,
                     onImportModel = { modelPicker.launch(arrayOf("*/*")) },
                     onImportCorpus = { corpusPicker.launch(arrayOf("text/*", "*/*")) },

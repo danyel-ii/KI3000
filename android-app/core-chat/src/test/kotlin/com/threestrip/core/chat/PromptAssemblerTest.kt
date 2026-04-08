@@ -9,14 +9,15 @@ class PromptAssemblerTest {
     fun trimKeepsRecentMessagesOnly() {
         val assembler = PromptAssembler(maxMessages = 2)
         val messages = listOf(
-            ChatMessage("1", "user", "one", 1),
-            ChatMessage("2", "assistant", "two", 2),
-            ChatMessage("3", "user", "three", 3),
+            ChatMessage("1", "user", "old_turn_marker", 1),
+            ChatMessage("2", "assistant", "recent_assistant_marker", 2),
+            ChatMessage("3", "user", "recent_user_marker", 3),
         )
-        val prompt = assembler.trim(messages, "four")
-        assertThat(prompt).doesNotContain("one")
-        assertThat(prompt).contains("three")
-        assertThat(prompt).contains("four")
+        val prompt = assembler.trim(messages, "new_user_marker")
+        assertThat(prompt).doesNotContain("old_turn_marker")
+        assertThat(prompt).contains("recent_assistant_marker")
+        assertThat(prompt).contains("recent_user_marker")
+        assertThat(prompt).contains("new_user_marker")
     }
 
     @Test

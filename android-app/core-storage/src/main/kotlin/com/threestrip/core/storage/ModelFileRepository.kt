@@ -40,4 +40,13 @@ class ModelFileRepository(private val context: Context) {
         if (path.isNullOrBlank()) return@withContext ""
         runCatching { File(path).takeIf { it.exists() }?.readText() ?: "" }.getOrDefault("")
     }
+
+    suspend fun firstLocalModelPath(): String? = withContext(Dispatchers.IO) {
+        val modelDir = File(context.filesDir, "models")
+        modelDir.listFiles()
+            ?.filter { it.isFile && (it.extension.equals("task", true) || it.extension.equals("litertlm", true)) }
+            ?.sortedBy { it.name }
+            ?.firstOrNull()
+            ?.absolutePath
+    }
 }

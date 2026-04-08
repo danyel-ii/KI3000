@@ -86,7 +86,7 @@ fun ThreeStripConsole(
     val sweep by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
         label = "sweep"
     )
     val flash = androidx.compose.runtime.remember { Animatable(0f) }
@@ -143,19 +143,19 @@ private fun ConsoleStrip(
         val gap = size.height * 0.03f
         val segHeight = (size.height - gap * (segments - 1)) / segments
         val travel = when (mode) {
-            ConsoleMode.IDLE -> ((sweep * 0.42f) + 0.18f) % 1f
-            ConsoleMode.LISTENING -> (sweep * 1.4f) % 1f
+            ConsoleMode.IDLE -> (0.04f + sweep * 0.92f).coerceIn(0f, 1f)
+            ConsoleMode.LISTENING -> (0.02f + sweep * 0.96f).coerceIn(0f, 1f)
             ConsoleMode.THINKING -> sweep
-            ConsoleMode.SPEAKING -> (sweep * 1.8f) % 1f
+            ConsoleMode.SPEAKING -> (0.01f + sweep * 0.98f).coerceIn(0f, 1f)
             ConsoleMode.ERROR -> 0.5f
-            ConsoleMode.BOOT -> 0.1f + (sweep * 0.25f)
+            ConsoleMode.BOOT -> (0.08f + sweep * 0.84f).coerceIn(0f, 1f)
         }
         repeat(segments) { idx ->
             val top = idx * (segHeight + gap)
             val segCenter = idx.toFloat() / (segments - 1).coerceAtLeast(1)
             val active = when (mode) {
-                ConsoleMode.LISTENING -> kotlin.math.abs(segCenter - sweep) < 0.34f
-                ConsoleMode.THINKING, ConsoleMode.SPEAKING -> kotlin.math.abs(segCenter - sweep) < 0.18f
+                ConsoleMode.LISTENING -> kotlin.math.abs(segCenter - travel) < 0.38f
+                ConsoleMode.THINKING, ConsoleMode.SPEAKING -> kotlin.math.abs(segCenter - travel) < 0.22f
                 else -> true
             }
             val alpha = if (active) intensity else intensity * 0.18f
@@ -187,9 +187,12 @@ private fun DrawScope.drawReferenceSegment(
     val left = size.width * 0.04f
     val width = size.width * 0.92f
     val segmentCenter = (top + (height * 0.5f)) / size.height
-    val distance = kotlin.math.abs(segmentCenter - lightBand)
-    val glowBoost = (1f - (distance / 0.22f)).coerceIn(0f, 1f) * bandStrength
-    val baseAlpha = alpha * (0.7f + glowBoost * 0.45f)
+    val headDistance = kotlin.math.abs(segmentCenter - lightBand)
+    val trailOffset = (lightBand - segmentCenter).coerceAtLeast(0f)
+    val scannerHead = (1f - (headDistance / 0.085f)).coerceIn(0f, 1f) * bandStrength
+    val scannerTail = (1f - (trailOffset / 0.24f)).coerceIn(0f, 1f) * bandStrength * 0.45f
+    val glowBoost = scannerHead + scannerTail
+    val baseAlpha = alpha * (0.66f + scannerHead * 0.52f + scannerTail * 0.28f)
     drawRect(
         brush = Brush.verticalGradient(
             listOf(
@@ -201,29 +204,43 @@ private fun DrawScope.drawReferenceSegment(
         size = Size(width, height),
     )
     if (glowBoost > 0.02f) {
-        val highlightTop = top + (height * 0.16f)
-        val highlightHeight = height * 0.68f
+        val highlightTop = top + (height * 0.2f)
+        val highlightHeight = height * 0.58f
+        val beamCenterX = left + width * 0.5f
+        val headWidth = width * 0.22f
+        val tailWidth = width * 0.58f
         drawRect(
-            brush = Brush.verticalGradient(
+            brush = Brush.horizontalGradient(
                 listOf(
                     Color.Transparent,
-                    Color(0xFFFFD6D6).copy(alpha = glowBoost * 0.35f),
-                    Color(0xFFFF7777).copy(alpha = glowBoost * 0.55f),
+                    Color(0xFFFF8F8F).copy(alpha = scannerTail * 0.3f),
+                    Color(0xFFFFEAEA).copy(alpha = scannerHead * 0.82f),
                     Color.Transparent,
                 )
             ),
-            topLeft = Offset(left + width * 0.18f, highlightTop),
-            size = Size(width * 0.64f, highlightHeight),
+            topLeft = Offset(beamCenterX - tailWidth * 0.5f, highlightTop),
+            size = Size(tailWidth, highlightHeight),
         )
         drawRect(
-            color = Color(0xFFFFB7B7).copy(alpha = glowBoost * 0.18f),
-            topLeft = Offset(left + width * 0.06f, top + height * 0.06f),
-            size = Size(width * 0.88f, height * 0.08f),
+            brush = Brush.horizontalGradient(
+                listOf(
+                    Color.Transparent,
+                    Color(0xFFFFF3F3).copy(alpha = scannerHead * 0.95f),
+                    Color.Transparent,
+                )
+            ),
+            topLeft = Offset(beamCenterX - headWidth * 0.5f, top + height * 0.12f),
+            size = Size(headWidth, height * 0.7f),
         )
         drawRect(
-            color = Color(0xFFFF5A5A).copy(alpha = glowBoost * 0.1f),
-            topLeft = Offset(left + width * 0.08f, top + height * 0.82f),
-            size = Size(width * 0.84f, height * 0.06f),
+            color = Color(0xFFFFC8C8).copy(alpha = scannerHead * 0.22f),
+            topLeft = Offset(left + width * 0.12f, top + height * 0.08f),
+            size = Size(width * 0.76f, height * 0.04f),
+        )
+        drawRect(
+            color = Color(0xFFFF5A5A).copy(alpha = scannerTail * 0.14f),
+            topLeft = Offset(left + width * 0.16f, top + height * 0.82f),
+            size = Size(width * 0.68f, height * 0.05f),
         )
     }
     drawRect(

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import com.threestrip.core.storage.ConsoleMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,10 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 class OfflineSpeechInputController(private val context: Context) {
+    private companion object {
+        const val TAG = "ThreeStripSpeech"
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _mode = MutableStateFlow(ConsoleMode.IDLE)
     val mode: StateFlow<ConsoleMode> = _mode
@@ -32,6 +37,7 @@ class OfflineSpeechInputController(private val context: Context) {
     ) {
         if (listening) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            Log.e(TAG, "startListening: recognition unavailable")
             pushError()
             onError("Offline speech recognition is unavailable on this device.")
             return
@@ -41,6 +47,7 @@ class OfflineSpeechInputController(private val context: Context) {
         this.onError = onError
         listening = true
         _mode.value = ConsoleMode.LISTENING
+        Log.d(TAG, "startListening: started")
 
         val speechRecognizer = recognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also { created ->
             created.setRecognitionListener(listener)
@@ -63,11 +70,13 @@ class OfflineSpeechInputController(private val context: Context) {
             _mode.value = ConsoleMode.IDLE
             return
         }
+        Log.d(TAG, "stop: requested")
         listening = false
         recognizer?.stopListening()
     }
 
     fun cancel() {
+        Log.d(TAG, "cancel: requested")
         listening = false
         recognizer?.cancel()
         _mode.value = ConsoleMode.IDLE
@@ -82,20 +91,25 @@ class OfflineSpeechInputController(private val context: Context) {
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
+            Log.d(TAG, "onReadyForSpeech")
             _mode.value = ConsoleMode.LISTENING
         }
 
         override fun onBeginningOfSpeech() {
+            Log.d(TAG, "onBeginningOfSpeech")
             _mode.value = ConsoleMode.LISTENING
         }
 
         override fun onRmsChanged(rmsdB: Float) = Unit
         override fun onBufferReceived(buffer: ByteArray?) = Unit
-        override fun onEndOfSpeech() = Unit
+        override fun onEndOfSpeech() {
+            Log.d(TAG, "onEndOfSpeech")
+        }
         override fun onPartialResults(partialResults: Bundle?) = Unit
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
 
         override fun onResults(results: Bundle?) {
+            listening = false
             _mode.value = ConsoleMode.IDLE
             val match = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -104,9 +118,11 @@ class OfflineSpeechInputController(private val context: Context) {
                 .orEmpty()
 
             if (match.isBlank()) {
+                Log.e(TAG, "onResults: empty")
                 onError?.invoke("No speech was recognized.")
                 pushError()
             } else {
+                Log.d(TAG, "onResults: \"$match\"")
                 onRecognized?.invoke(match)
             }
         }
@@ -127,6 +143,7 @@ class OfflineSpeechInputController(private val context: Context) {
                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognizer is busy."
                 else -> "Voice recognition failed."
             }
+            Log.e(TAG, "onError: code=$error message=$message")
             onError?.invoke(message)
             if (error == SpeechRecognizer.ERROR_CLIENT) {
                 _mode.value = ConsoleMode.IDLE

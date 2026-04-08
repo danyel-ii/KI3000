@@ -48,6 +48,7 @@ class SettingsStore(private val context: Context) {
     private val corpusPathKey = stringPreferencesKey("corpus_path")
     private val ttsEnabledKey = booleanPreferencesKey("tts_enabled")
     private val autoSpeakKey = booleanPreferencesKey("auto_speak")
+    private val ttsVoiceNameKey = stringPreferencesKey("tts_voice_name")
     private val debugOverlayKey = booleanPreferencesKey("debug_overlay")
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data
@@ -55,10 +56,11 @@ class SettingsStore(private val context: Context) {
         .map { prefs ->
             AppSettings(
                 modelPath = prefs[modelPathKey],
-                systemPrompt = prefs[systemPromptKey] ?: "",
+                systemPrompt = prefs[systemPromptKey] ?: KITT_SYSTEM_PROMPT,
                 corpusPath = prefs[corpusPathKey],
                 ttsEnabled = prefs[ttsEnabledKey] ?: true,
                 autoSpeak = prefs[autoSpeakKey] ?: true,
+                ttsVoiceName = prefs[ttsVoiceNameKey],
                 debugOverlay = prefs[debugOverlayKey] ?: false,
             )
         }
@@ -87,6 +89,12 @@ class SettingsStore(private val context: Context) {
 
     suspend fun updateAutoSpeak(value: Boolean) {
         context.settingsDataStore.edit { it[autoSpeakKey] = value }
+    }
+
+    suspend fun updateTtsVoiceName(value: String?) {
+        context.settingsDataStore.edit { prefs ->
+            if (value.isNullOrBlank()) prefs.remove(ttsVoiceNameKey) else prefs[ttsVoiceNameKey] = value
+        }
     }
 
     suspend fun updateDebugOverlay(value: Boolean) {
