@@ -1,0 +1,49 @@
+[versions]
+compileSdk = "35"
+minSdk = "31"
+targetSdk = "35"
+composeBom = "2024.09.00"
+activityCompose = "1.9.2"
+lifecycle = "2.8.6"
+navigation = "2.8.0"
+coreKtx = "1.13.1"
+coroutines = "1.8.1"
+room = "2.6.1"
+datastore = "1.1.1"
+serialization = "1.6.3"
+junit4 = "4.13.2"
+truth = "1.4.4"
+androidxTestExt = "1.2.1"
+espresso = "3.6.1"
+composeUiTest = "1.7.2"
+mediapipeGenai = "0.10.24"
+
+[libraries]
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
+androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
+androidx-room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
+androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", version.ref = "coroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+mediapipe-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "mediapipeGenai" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+truth = { module = "com.google.truth:truth", version.ref = "truth" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExt" }
+androidx-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
+androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4", version.ref = "composeUiTest" }
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "composeUiTest" }
+
+[plugins]
+android-application = { id = "com.android.application", version = "8.5.2" }
+android-library = { id = "com.android.library", version = "8.5.2" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version = "1.9.24" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version = "1.9.24" }
+ksp = { id = "com.google.devtools.ksp", version = "1.9.24-1.0.20" }
